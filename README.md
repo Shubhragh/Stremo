@@ -10,15 +10,6 @@ It includes:
 - ML recommendation engine (hybrid collaborative + content + search profile)
 - Judge-friendly auto-seeded demo data
 
-## Competition Compliance Snapshot
-- Full requirement-by-requirement mapping:
-  - `docs/competition_compliance_matrix.md`
-- Architecture diagram and data flow:
-  - `docs/architecture.md`
-- Scalability and cost strategy:
-  - `docs/scaling_cost_tradeoffs.md`
-- AI/ML explanation (why ML, data used, UX impact):
-  - `docs/ml_recommendation_approach.md`
 
 ## Architecture
 - `frontend` (`:3000`)
@@ -194,15 +185,6 @@ Create submission zip:
 powershell -ExecutionPolicy Bypass -File scripts/package_submission.ps1
 ```
 
-## Submission Checklist
-- Source code with `docker-compose.yml`
-- README (this file)
-- Architecture diagram (`docs/architecture.md`)
-- Scalability/cost tradeoffs (`docs/scaling_cost_tradeoffs.md`)
-- ML recommendation approach (`docs/ml_recommendation_approach.md`)
-- Compliance matrix (`docs/competition_compliance_matrix.md`)
-- API contracts (`docs/api_contracts.md`)
-- Demo script (`docs/demo_script.md`)
 
 ## Scope and Assumptions
 - VOD only; live streaming is intentionally out of scope.

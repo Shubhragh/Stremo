@@ -10,15 +10,6 @@ It includes:
 - ML recommendation engine (hybrid collaborative + content + search profile)
 - Judge-friendly auto-seeded demo data
 
-## Competition Compliance Snapshot
-- Full requirement-by-requirement mapping:
-  - `docs/competition_compliance_matrix.md`
-- Architecture diagram and data flow:
-  - `docs/architecture.md`
-- Scalability and cost strategy:
-  - `docs/scaling_cost_tradeoffs.md`
-- AI/ML explanation (why ML, data used, UX impact):
-  - `docs/ml_recommendation_approach.md`
 
 ## Architecture
 - `frontend` (`:3000`)

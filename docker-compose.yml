@@ -1,0 +1,219 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: scalastream-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: scalastream
+      POSTGRES_USER: scalastream
+      POSTGRES_PASSWORD: scalastream
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scalastream -d scalastream"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: scalastream-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: scalastream-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-setup:
+    image: minio/mc:latest
+    container_name: scalastream-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb -p local/raw-videos || true &&
+      mc mb -p local/processed-videos || true &&
+      mc anonymous set public local/processed-videos &&
+      echo 'MinIO buckets are ready';
+      "
+    restart: "no"
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+    container_name: scalastream-api-gateway
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      video-service:
+        condition: service_started
+      recommendation-service:
+        condition: service_started
+    environment:
+      NODE_ENV: development
+      PORT: 8080
+      DATABASE_URL: postgres://scalastream:scalastream@postgres:5432/scalastream
+      JWT_SECRET: scalastream-super-secret
+      VIDEO_SERVICE_URL: http://video-service:8081
+      RECOMMENDATION_SERVICE_URL: http://recommendation-service:8082
+      CORS_ORIGIN: http://localhost:3000
+    ports:
+      - "8080:8080"
+
+  video-service:
+    build:
+      context: ./services/video-service
+    container_name: scalastream-video-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: development
+      PORT: 8081
+      DATABASE_URL: postgres://scalastream:scalastream@postgres:5432/scalastream
+      REDIS_URL: redis://redis:6379
+      EVENT_STREAM_KEY: scalastream-events
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_RAW_BUCKET: raw-videos
+      MINIO_PROCESSED_BUCKET: processed-videos
+      MAX_UPLOAD_SIZE_MB: 500
+      STREAM_BASE_URL: http://localhost:8090/stream
+      RECOMMENDATION_SERVICE_URL: http://recommendation-service:8082
+      JWT_SECRET: scalastream-super-secret
+      MIN_QUALIFIED_VIEW_SECONDS: 8
+      MIN_QUALIFIED_VIEW_COMPLETION_RATE: 0.2
+      MAX_SEARCH_QUERY_LENGTH: 120
+      MAX_COMMENT_LENGTH: 240
+      ADMIN_EMAILS: "*"
+    ports:
+      - "8081:8081"
+
+  transcode-worker:
+    build:
+      context: ./services/transcode-worker
+    container_name: scalastream-transcode-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://scalastream:scalastream@postgres:5432/scalastream
+      REDIS_URL: redis://redis:6379/0
+      EVENT_STREAM_KEY: scalastream-events
+      EVENT_STREAM_GROUP: transcode-workers
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_RAW_BUCKET: raw-videos
+      MINIO_PROCESSED_BUCKET: processed-videos
+      MAX_RETRIES: 3
+      RETRY_BACKOFF_SECONDS: 10
+
+  recommendation-service:
+    build:
+      context: ./services/recommendation-service
+    container_name: scalastream-recommendation-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8082
+      DATABASE_URL: postgresql://scalastream:scalastream@postgres:5432/scalastream
+      TRAIN_INTERVAL_SECONDS: 300
+      MODEL_DIR: /app/model_store
+      RECENCY_HALF_LIFE_DAYS: 10
+    ports:
+      - "8082:8082"
+
+  frontend:
+    build:
+      context: ./web/frontend
+    container_name: scalastream-frontend
+    restart: unless-stopped
+    depends_on:
+      api-gateway:
+        condition: service_started
+    environment:
+      PORT: 3000
+      API_BASE_URL: AUTO
+      STREAM_BASE_URL: AUTO
+    ports:
+      - "3000:3000"
+
+  stream-gateway:
+    image: nginx:1.27-alpine
+    container_name: scalastream-stream-gateway
+    restart: unless-stopped
+    depends_on:
+      minio-setup:
+        condition: service_completed_successfully
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8090:8090"
+
+  demo-seeder:
+    build:
+      context: ./services/demo-seeder
+    container_name: scalastream-demo-seeder
+    restart: "no"
+    depends_on:
+      api-gateway:
+        condition: service_started
+      transcode-worker:
+        condition: service_started
+    environment:
+      API_BASE: http://api-gateway:8080
+      SAMPLE_VIDEO_PATH: /assets/sample.mp4
+      SEED_IF_EMPTY_ONLY: "true"
+    volumes:
+      - ./tmp:/assets:ro
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

@@ -1,0 +1,5 @@
+APScheduler==3.10.4
+fastapi==0.114.2
+numpy==1.26.4
+psycopg2-binary==2.9.9
+uvicorn==0.30.6

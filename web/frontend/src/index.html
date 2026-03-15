@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ScalaStream</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="healthBanner" class="health-banner hidden"></div>
+
+    <header class="topbar">
+      <button id="mobileMenuBtn" type="button" class="mobile-menu-btn" aria-label="Open menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+      <a href="/" class="brand-link" id="brandLink" aria-label="ScalaStream Home">
+        <span class="brand-logo" aria-hidden="true"></span>
+        <span class="brand-text-wrap">
+          <strong>ScalaStream</strong>
+          <small>Streaming Platform</small>
+        </span>
+      </a>
+
+      <form id="searchForm" class="search-shell" autocomplete="off">
+        <input
+          id="searchInput"
+          type="search"
+          placeholder="Search videos, topics, creators"
+          aria-label="Search videos"
+        />
+        <button id="searchBtn" type="submit" class="btn strong search-btn" aria-label="Search">
+          <span class="search-btn-icon" aria-hidden="true"></span>
+          <span class="search-btn-label">Search</span>
+        </button>
+        <button id="searchClearBtn" type="button" class="btn ghost search-clear-btn" aria-label="Clear search">
+          <span class="search-clear-icon" aria-hidden="true">x</span>
+          <span class="search-clear-label">Clear</span>
+        </button>
+        <div id="searchSuggestPanel" class="suggest-panel hidden" role="listbox" aria-label="Search suggestions">
+          <ul id="searchSuggestList"></ul>
+        </div>
+      </form>
+      <button id="themeToggleBtn" type="button" class="theme-toggle-btn" aria-label="Toggle color theme">Dark</button>
+
+      <div class="account-zone">
+        <div id="signedOutActions" class="account-actions">
+          <button id="openLoginBtn" type="button" class="btn ghost">Sign In</button>
+          <button id="openRegisterBtn" type="button" class="btn strong">Create Account</button>
+        </div>
+        <div id="signedInActions" class="account-actions hidden">
+          <span id="sessionState" class="session-state">Not signed in</span>
+          <button id="logoutBtn" type="button" class="btn ghost">Logout</button>
+        </div>
+      </div>
+    </header>
+    <div id="mobileBackdrop" class="mobile-backdrop hidden"></div>
+
+    <div class="app-layout">
+      <aside class="left-rail">
+        <div class="rail-mobile-head">
+          <strong>Menu</strong>
+          <button id="mobileMenuCloseBtn" type="button" class="btn ghost" aria-label="Close menu">Close</button>
+        </div>
+        <section class="rail-card nav-card">
+          <h2>Explore</h2>
+          <button class="rail-link active" data-nav="home" type="button">Home</button>
+          <button class="rail-link" data-mode="recommended" type="button">For You</button>
+          <button class="rail-link" data-mode="trending" type="button">Trending</button>
+          <button class="rail-link" data-mode="fresh" type="button">Fresh</button>
+          <button class="rail-link" data-mode="continue" type="button">Continue Watching</button>
+          <button class="rail-link" data-nav="manage" type="button">Manage Videos</button>
+          <p id="recMeta" class="hint">Recommendations update from watch/search/engagement data.</p>
+          <button id="retrainBtn" type="button" class="btn ghost full" title="Re-analyze machine learning model based on recent user activity to improve recommendations">Retrain Model</button>
+          <p class="hint ml-note"><strong>How it works:</strong> The retrain button re-analyzes your viewing patterns, searches, and engagement. This helps personalize recommendations just for you. Click it after watching several videos to get better results.</p>
+        </section>
+
+        <section class="rail-card upload-card">
+          <h2>Upload</h2>
+          <p id="uploadLockHint" class="hint">Sign in to upload and manage your videos.</p>
+          <form id="uploadForm" class="stack-form">
+            <label>Title <input required type="text" name="title" placeholder="My stream clip" /></label>
+            <label>Description <textarea name="description" rows="3" placeholder="Video summary"></textarea></label>
+            <label>Video File <input id="videoFileInput" required type="file" name="file" accept="video/*" /></label>
+            <button type="submit" class="btn strong">Upload and Process</button>
+          </form>
+          <div class="progress-wrap">
+            <div class="progress-head"><span>Upload Progress</span><strong id="uploadProgressValue">0%</strong></div>
+            <div class="progress-track"><div id="uploadProgressBar" class="progress-bar"></div></div>
+          </div>
+          <p id="uploadMessage" class="message">No uploads yet.</p>
+          <ul id="uploadQueue" class="queue-list"></ul>
+        </section>
+
+        <section class="rail-card history-card">
+          <div class="activity-head">
+            <h2>Your Activity</h2>
+            <button id="toggleActivityBtn" class="btn ghost activity-toggle-btn" type="button" aria-expanded="false">Show</button>
+          </div>
+          <div id="activityBody" class="activity-body hidden">
+            <div class="history-group">
+              <h3>Watch History</h3>
+              <ul id="watchHistoryList" class="history-list"></ul>
+            </div>
+            <div class="history-group">
+              <h3>Search History</h3>
+              <ul id="searchHistoryList" class="history-list"></ul>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <main class="main-content">
+        <section id="homeView" class="view-section">
+          <div class="section-head">
+            <h1>Home Feed</h1>
+            <p id="homeSubhead">Personalized and trending videos with low-latency playback.</p>
+          </div>
+
+          <div class="metrics-row">
+            <article class="metric"><span>Ready Videos</span><strong id="metricVideos">0</strong></article>
+            <article class="metric"><span>Total Views</span><strong id="metricViews">0</strong></article>
+            <article class="metric"><span>Queue Active</span><strong id="metricQueue">0</strong></article>
+            <article class="metric"><span>Recommended IDs</span><strong id="metricRecs">0</strong></article>
+          </div>
+
+          <div class="toolbar-row">
+            <div class="chips">
+              <button class="chip-filter active" data-filter="all" type="button">All</button>
+              <button class="chip-filter" data-filter="recommended" type="button">Recommended</button>
+              <button class="chip-filter" data-filter="popular" type="button">Popular</button>
+            </div>
+            <label class="sort-wrap">
+              Sort
+              <select id="sortSelect">
+                <option value="recent">Most Recent</option>
+                <option value="views">Most Viewed</option>
+                <option value="likes">Most Liked</option>
+                <option value="title">Title A-Z</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="videoGrid" class="video-grid"></div>
+        </section>
+
+        <section id="watchView" class="view-section hidden">
+          <button id="backHomeBtn" type="button" class="btn ghost back-btn">Back to Home</button>
+
+          <div class="watch-layout">
+            <div class="watch-main">
+              <div class="watch-player-shell">
+                <video id="watchVideo" controls preload="metadata"></video>
+                <div id="playerDiag" class="player-diag">Select a video to start playback.</div>
+                <div id="resumePrompt" class="resume-prompt hidden" role="dialog" aria-label="Resume playback">
+                  <span id="resumePromptText">Resume from where you left?</span>
+                  <div class="resume-actions">
+                    <button id="resumeNowBtn" type="button" class="btn strong">Resume</button>
+                    <button id="resumeStartBtn" type="button" class="btn ghost">Start Over</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="watch-controls">
+                <label>Quality
+                  <select id="watchQualitySelect">
+                    <option value="-1">Auto</option>
+                  </select>
+                </label>
+                <label>Speed
+                  <select id="watchSpeedSelect">
+                    <option value="0.75">0.75x</option>
+                    <option value="1" selected>1x</option>
+                    <option value="1.25">1.25x</option>
+                    <option value="1.5">1.5x</option>
+                    <option value="2">2x</option>
+                  </select>
+                </label>
+                <label class="toggle-wrap">
+                  <input id="autoplayToggle" type="checkbox" />
+                  <span>Autoplay</span>
+                </label>
+                <button id="retryPlaybackBtn" type="button" class="btn ghost">Retry</button>
+                <button id="openRawBtn" type="button" class="btn ghost">Open Stream</button>
+              </div>
+
+              <article class="watch-meta-card">
+                <h2 id="watchTitle">No video selected</h2>
+                <p id="watchMetaLine" class="watch-meta-line">Open a video from home feed.</p>
+                <p id="watchDescription" class="watch-description"></p>
+                <div id="watchTagRow" class="watch-tag-row"></div>
+                <div class="watch-actions">
+                  <button id="watchLikeBtn" type="button" class="btn">Like</button>
+                  <button id="watchUnlikeBtn" type="button" class="btn ghost">Unlike</button>
+                  <button id="watchDeleteBtn" type="button" class="btn danger hidden">Delete Video</button>
+                </div>
+              </article>
+
+              <section class="comments-card">
+                <div class="comments-head">
+                  <h3>Comments &amp; Engagement</h3>
+                  <span id="watchCommentCount" class="comment-badge">0 comments</span>
+                </div>
+                <div class="comment-compose">
+                  <input id="watchCommentInput" type="text" maxlength="240" placeholder="Share your thoughts..." />
+                  <button id="watchCommentBtn" type="button" class="btn strong">Post Comment</button>
+                </div>
+                <ul id="watchComments" class="comment-list"></ul>
+              </section>
+            </div>
+
+            <aside class="watch-side">
+              <h3>Up Next</h3>
+              <ul id="watchRecommendationList" class="recommend-list"></ul>
+            </aside>
+          </div>
+        </section>
+
+        <section id="manageView" class="view-section hidden">
+          <div class="section-head">
+            <h1>Manage Videos</h1>
+            <p id="manageSubhead">Delete videos based on your account permissions.</p>
+          </div>
+          <div id="manageGrid" class="manage-grid"></div>
+        </section>
+      </main>
+    </div>
+    <nav class="mobile-bottom-nav">
+      <button class="mobile-nav-link active" data-nav="home" type="button">Home</button>
+      <button class="mobile-nav-link" data-mode="recommended" type="button">For You</button>
+      <button class="mobile-nav-link" data-mode="trending" type="button">Trending</button>
+      <button class="mobile-nav-link" data-nav="manage" type="button">Manage</button>
+    </nav>
+
+    <div id="authModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Authentication">
+      <div class="modal-card">
+        <button id="closeAuthBtn" type="button" class="modal-close" aria-label="Close">x</button>
+        <div class="auth-tabs">
+          <button id="loginTabBtn" data-auth-tab="login" class="auth-tab active" type="button">Sign In</button>
+          <button id="registerTabBtn" data-auth-tab="register" class="auth-tab" type="button">Create Account</button>
+        </div>
+
+        <form id="loginForm" class="stack-form auth-form">
+          <label>Email <input required type="email" name="email" placeholder="you@example.com" /></label>
+          <label>Password <input required type="password" name="password" minlength="6" placeholder="password" /></label>
+          <button type="submit" class="btn strong">Sign In</button>
+        </form>
+
+        <form id="registerForm" class="stack-form auth-form hidden">
+          <label>Email <input required type="email" name="email" placeholder="new@example.com" /></label>
+          <label>Password <input required type="password" name="password" minlength="6" placeholder="min 6 characters" /></label>
+          <button type="submit" class="btn strong">Create Account</button>
+        </form>
+
+        <p id="authMessage" class="message">Sign in to personalize your feed and interactions.</p>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="/config.js"></script>
+    <script src="/vendor/hls.min.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

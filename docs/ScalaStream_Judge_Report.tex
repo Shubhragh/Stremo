@@ -1,0 +1,341 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{graphicx}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!60!black
+}
+
+\lstdefinestyle{plain}{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible
+}
+
+\title{\textbf{ScalaStream: Judge-Ready Technical Report}\\
+Video Streaming Systems -- WebSystems \& Machine Learning Competition\\
+Ingenium, IIT Indore}
+\author{ScalaStream Team}
+\date{March 15, 2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Executive Summary}
+ScalaStream is a containerized Video-on-Demand platform designed to satisfy the competition requirements end-to-end: upload, asynchronous transcoding, low-latency playback, metadata interactions, and personalized recommendations using machine learning.
+
+The system is implemented as production-style microservices using Node.js and Python with Docker Compose:
+\begin{itemize}[leftmargin=1.2em]
+  \item API Gateway/Auth, Video Service, Transcode Worker, Recommendation Service, and Web Frontend.
+  \item PostgreSQL for transactional metadata, Redis for queue and hot counters, MinIO for object storage, and Nginx as stream gateway.
+\end{itemize}
+
+Most importantly for judging, the recommendation feed is not static rule logic. It is model-driven through a hybrid ML pipeline that learns from watch history, likes, comments, and search behavior.
+
+\section{Competition Requirement Interpretation}
+From the official problem statement, the mandatory pillars are:
+\begin{enumerate}[leftmargin=1.4em]
+  \item Functional streaming workflow (upload to playback plus metadata).
+  \item Non-functional engineering quality (latency, fault handling, scalability/cost tradeoffs).
+  \item Real ML-based recommendation (not rule-based), with clear explanation of why ML is used, what data is used, and how UX improves.
+\end{enumerate}
+
+This report maps each requirement to implementation evidence and explains technical decisions and tradeoffs.
+
+\section{System Architecture}
+\subsection{Component Overview}
+\begin{table}[H]
+\centering
+\begin{tabularx}{\textwidth}{@{}p{3.0cm}p{2.3cm}X@{}}
+\toprule
+\textbf{Component} & \textbf{Stack} & \textbf{Responsibility} \\
+\midrule
+Frontend & Node + Vanilla JS + HLS.js & Watch flow, search, auth UX, upload form, recommendation rails, playback controls \\
+API Gateway/Auth & Node.js (Express) & Register/login/JWT validation, identity propagation, routing to services \\
+Video Service & Node.js (Express) & Upload API, metadata APIs, search, history, qualified view and retention logic \\
+Transcode Worker & Python + FFmpeg & Async event consumption, HLS generation (360p/720p), thumbnail extraction, retries \\
+Recommendation Service & FastAPI + NumPy & Scheduled training, ranking endpoints, model persistence \\
+PostgreSQL & Relational DB & Users, videos, likes, comments, views, watch sessions, search events \\
+Redis & Queue + Cache & Stream events for transcoding, hot aggregate counters \\
+MinIO & Object Storage & Raw uploads and processed HLS artifacts \\
+Nginx Stream Gateway & Nginx & Low-latency delivery of manifests and segments from MinIO \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Upload to Playback Data Flow}
+\begin{enumerate}[leftmargin=1.4em]
+  \item User uploads via \texttt{POST /videos/upload}.
+  \item Raw file is saved to MinIO (\texttt{raw-videos} bucket), video status becomes \texttt{UPLOADED}.
+  \item Event \texttt{video\_uploaded} is published to Redis stream.
+  \item Worker consumes event, validates media, transcodes to HLS variants (\texttt{360p}, \texttt{720p}), writes \texttt{master.m3u8}, extracts thumbnail.
+  \item Processed files are stored in MinIO (\texttt{processed-videos}), DB status becomes \texttt{READY}.
+  \item Frontend streams through \texttt{/stream/\{videoId\}/master.m3u8} served by Nginx.
+\end{enumerate}
+
+\subsection{Metadata and Recommendation Data Flow}
+\begin{enumerate}[leftmargin=1.4em]
+  \item User interactions (likes, comments, views, watch progress, searches) are persisted.
+  \item Video aggregates are updated in DB and cached in Redis.
+  \item Recommendation service periodically retrains from interaction and content data.
+  \item \texttt{GET /feed/recommended} returns per-user ranked feed with explanation tags.
+\end{enumerate}
+
+\section{Functional Requirement Compliance}
+\begin{longtable}{@{}p{4.5cm}p{2.2cm}p{7.8cm}@{}}
+\toprule
+\textbf{Requirement} & \textbf{Status} & \textbf{Evidence} \\
+\midrule
+\endhead
+User authentication and authorization & Met & \texttt{POST /auth/register}, \texttt{POST /auth/login}, \texttt{GET /auth/me}; JWT validation in API gateway. \\
+Video upload functionality & Met & \texttt{POST /videos/upload} with multipart handling, validation, owner tracking. \\
+Video transcoding and storage & Met & Worker creates HLS renditions and stores processed assets in MinIO. \\
+Video streaming playback & Met & Dedicated watch route \texttt{/watch/:videoId}; HLS playback via stream gateway. \\
+Metadata management (likes/comments/views) & Met & \texttt{/videos/:id/like}, \texttt{/videos/:id/comment}, \texttt{/videos/:id/view} with persistence and counters. \\
+ML-based recommendation feed & Met & \texttt{GET /feed/recommended?userId=...} served by trained hybrid model. \\
+Concurrent uploads support & Met & Upload ingest decoupled from transcoding using Redis stream queue. \\
+\bottomrule
+\end{longtable}
+
+\section{Non-Functional Requirement Coverage}
+\begin{longtable}{@{}p{4.4cm}p{2.1cm}p{8.0cm}@{}}
+\toprule
+\textbf{Requirement} & \textbf{Status} & \textbf{Implementation Notes} \\
+\midrule
+\endhead
+Low-latency video delivery & Met & HLS segment delivery through Nginx, cache-friendly headers, short segment duration. \\
+High availability and fault tolerance & Mostly Met (local-competition scale) & Queue decoupling, retry and pending-message reclaim in worker, health endpoints, graceful service degradation in UI. \\
+Cost-efficient storage/network utilization & Met & Two-rendition ladder (360p/720p), object storage separation, scheduled training instead of per-request training. \\
+Scalable architecture & Met (conceptual horizontal scaling) & Stateless API services, scalable worker group consumers, object storage and queue separation. \\
+Graceful failure handling & Met & Transcode failure states, retry/finalize controls, status endpoint with queue visibility. \\
+Clear tradeoff justification & Met & Documented in scalability/cost strategy with explicit alternatives and rationale. \\
+\bottomrule
+\end{longtable}
+
+\section{Machine Learning Recommendation System (Critical Requirement)}
+\subsection{Why ML Is Used}
+Static or manually curated recommendation logic cannot adapt to changing user interests at session level. ScalaStream uses machine learning so the ranking reflects:
+\begin{itemize}[leftmargin=1.2em]
+  \item implicit preference strength from viewing depth and completion,
+  \item explicit engagement from likes and comments,
+  \item intent from search history.
+\end{itemize}
+This directly addresses the requirement that rule-only recommendation is insufficient.
+
+\subsection{Training Data Used}
+The model uses behavior and content data from PostgreSQL:
+\begin{itemize}[leftmargin=1.2em]
+  \item \texttt{video\_views}: watch seconds and completion rate,
+  \item \texttt{video\_likes}: positive affinity,
+  \item \texttt{video\_comments}: stronger engagement signal,
+  \item \texttt{user\_search\_events}: search intent over time,
+  \item \texttt{videos} + \texttt{video\_aggregates}: title, description, recency, engagement context.
+\end{itemize}
+
+\subsection{Feature Engineering}
+For each user-video interaction, an implicit preference score is formed:
+\[
+\text{score} = 1.45\cdot\text{watch\_ratio}
++ 1.25\cdot\text{completion}
++ 1.35\cdot\text{like\_flag}
++ 1.10\cdot\text{comment\_flag}
++ 0.65\cdot\text{recency\_weight}
+\]
+
+Additional representation features:
+\begin{itemize}[leftmargin=1.2em]
+  \item Item text vectors from title+description (compact hashed n-gram embedding).
+  \item User content profile from watched items plus time-decayed search history.
+\end{itemize}
+
+\subsection{Model Architecture}
+ScalaStream uses a hybrid recommender:
+\begin{enumerate}[leftmargin=1.4em]
+  \item \textbf{Collaborative layer}: BPR-style pairwise matrix factorization (learned user/item latent vectors).
+  \item \textbf{Content layer}: item/user vectors from textual and search signals.
+  \item \textbf{Supervised calibration layer}: logistic calibration model trained on sampled positive/negative user-item pairs to learn blend coefficients.
+  \item \textbf{Priors}: popularity and recency for tie-break and cold start robustness.
+\end{enumerate}
+
+\subsection{Ranking at Inference Time}
+Final ranking is a weighted blend:
+\[
+\text{final} = w_c\cdot\text{collab} + w_t\cdot\text{content}
++ w_l\cdot\text{live\_profile}
++ w_p\cdot\text{popularity}
++ w_r\cdot\text{recency}
+\]
+Unlike static hand-tuned coefficients, the blend weights are learned during training through logistic loss minimization on sampled ranking pairs, then used at inference.
+
+\subsection{Why This Is Not Rule-Based}
+The personalized endpoint \texttt{/feed/recommended} is model-driven because:
+\begin{itemize}[leftmargin=1.2em]
+  \item latent vectors are learned via iterative optimization,
+  \item ranking uses learned affinity scores in embedding space,
+  \item blend coefficients are learned by supervised logistic calibration,
+  \item training is periodic and data-dependent,
+  \item different users receive different ranked outputs from the same catalog.
+\end{itemize}
+
+\subsection{Retrain Button Purpose}
+The UI ``Retrain Model'' button triggers \texttt{POST /feed/train}. It forces immediate retraining from latest interactions so new watch/like/search behavior is reflected quickly during live demo without waiting for scheduler interval.
+
+\section{Validation Evidence (Local Demonstration)}
+\subsection{Service Health Snapshot}
+\begin{lstlisting}[style=plain,caption={Health endpoint checks}]
+GET /health (api-gateway): ok
+GET /health (video-service): ok
+GET /health (recommendation-service): ok, model ready=true
+GET /health (stream-gateway): ok
+\end{lstlisting}
+
+\subsection{Recommendation Model Health Example}
+\begin{lstlisting}[style=plain,caption={Recommendation service health summary}]
+model.ready = true
+training_summary.users = 7
+training_summary.videos = 16
+training_summary.interactions = 41
+training_summary.search_events = 137
+training_summary.mode = hybrid_bpr_content
+\end{lstlisting}
+
+\subsection{Evidence of Personalization}
+In local verification, two different demo users produced different top-5 ranked lists from \texttt{/feed/recommended}. This demonstrates user-dependent ranking behavior, not static ordering.
+
+\subsection{Engagement Integrity Checks}
+\begin{itemize}[leftmargin=1.2em]
+  \item Repeated like by the same user on same video returns no additional increment (DB unique constraint).
+  \item View counting is sessionized and qualified; early watch event may not count while later sufficient watch progression counts.
+  \item Retention metrics are derived from \texttt{video\_watch\_sessions} progression.
+\end{itemize}
+
+\subsection{Failure Recovery Demonstration}
+\texttt{scripts/failure\_demo.ps1} stops the transcode worker, simulates interrupted processing, restarts worker, and polls status until recovery (\texttt{READY}) or timeout.
+
+\subsection{Concurrent Upload Test}
+\texttt{scripts/upload\_concurrency\_test.js} uses k6 with 20 virtual users uploading simultaneously to validate queue-based concurrency handling.
+
+\section{Deployment and Submission Readiness}
+\subsection{One-Command Startup}
+\begin{lstlisting}[style=plain]
+docker compose up -d --build
+\end{lstlisting}
+
+\subsection{Persistence Guarantees}
+Docker volumes persist state across restarts:
+\begin{itemize}[leftmargin=1.2em]
+  \item \texttt{postgres\_data}
+  \item \texttt{minio\_data}
+  \item \texttt{redis\_data}
+\end{itemize}
+Using \texttt{docker compose down} keeps data. Using \texttt{docker compose down -v} clears all state.
+
+\subsection{Independent Judge Run}
+The repository is self-contained for judge environments:
+\begin{enumerate}[leftmargin=1.4em]
+  \item Clone/unzip repository.
+  \item Run Docker Compose.
+  \item Open frontend at \texttt{http://localhost:3000}.
+  \item Use seeded demo accounts or create new users.
+  \item Execute demo script from documentation.
+\end{enumerate}
+
+\section{Honest Scope, Risks, and Mitigations}
+\subsection{Scope Alignment}
+\begin{itemize}[leftmargin=1.2em]
+  \item Live streaming is intentionally out of scope (VOD only), aligned with competition scope.
+  \item Architecture supports horizontal scalability conceptually; deployment target is local competition demonstration.
+\end{itemize}
+
+\subsection{Known Risks}
+\begin{itemize}[leftmargin=1.2em]
+  \item Single-instance database/cache in local mode is not multi-zone HA.
+  \item Performance characteristics vary by local machine resources.
+\end{itemize}
+
+\subsection{Mitigations}
+\begin{itemize}[leftmargin=1.2em]
+  \item Queue decoupling and retries reduce failure impact.
+  \item Health endpoints and UI degradation messaging improve diagnosability.
+  \item Scale path is documented for worker and stateless service replicas.
+\end{itemize}
+
+\section{Final Compliance Verdict}
+Based on implementation and local validation:
+\begin{itemize}[leftmargin=1.2em]
+  \item \textbf{Functional requirements:} Met.
+  \item \textbf{AI/ML requirement (must be non-rule-based):} Met.
+  \item \textbf{Deliverables:} Met.
+  \item \textbf{Optional enhancements:} Met.
+  \item \textbf{Non-functional requirements:} Met for competition-scale deployment, with clearly documented tradeoffs and horizontal scaling path.
+\end{itemize}
+
+\appendix
+\section{API Summary}
+\begin{longtable}{@{}p{4.0cm}p{10.5cm}@{}}
+\toprule
+\textbf{Endpoint} & \textbf{Purpose} \\
+\midrule
+\endhead
+\texttt{POST /auth/register} & Create user account \\
+\texttt{POST /auth/login} & Authenticate and receive JWT \\
+\texttt{GET /auth/me} & Validate and return current user \\
+\texttt{POST /videos/upload} & Upload source video and enqueue transcode \\
+\texttt{GET /videos/:id/status} & Poll transcode lifecycle state \\
+\texttt{POST /videos/:id/finalize} & Requeue failed or force reprocess \\
+\texttt{GET /videos} & List ready videos with metadata \\
+\texttt{GET /videos/search} & Search by title/description relevance \\
+\texttt{GET /videos/:id} & Video details for watch page \\
+\texttt{DELETE /videos/:id} & Owner/admin deletion \\
+\texttt{POST /videos/:id/like} & Like video (auth required) \\
+\texttt{DELETE /videos/:id/like} & Unlike video (auth required) \\
+\texttt{POST /videos/:id/comment} & Add comment (auth required) \\
+\texttt{POST /videos/:id/view} & Sessionized watch event and qualified view logic \\
+\texttt{GET /videos/history/watch} & Watch history for user \\
+\texttt{GET /videos/history/search} & Search history for user \\
+\texttt{POST /videos/history/search} & Log search query for user \\
+\texttt{GET /feed/recommended} & Personalized ML-ranked feed \\
+\texttt{GET /feed/trending} & Trending feed mode \\
+\texttt{GET /feed/fresh} & Fresh feed mode \\
+\texttt{GET /feed/continue} & Continue watching feed mode \\
+\texttt{POST /feed/train} & Manual retraining trigger \\
+\bottomrule
+\end{longtable}
+
+\section{Quick Demo Script (Under 7 Minutes)}
+\begin{enumerate}[leftmargin=1.4em]
+  \item Start system with Docker Compose and open frontend.
+  \item Register or log in with demo accounts.
+  \item Upload a video and show status polling until \texttt{READY}.
+  \item Open watch page, verify large playback, quality switch, speed control.
+  \item Like and comment as authenticated user and show counter updates.
+  \item Show watch history/search history and qualified view behavior.
+  \item Show \texttt{For You} feed, trigger retrain, and show ranking update.
+\end{enumerate}
+
+\section{How to Compile This Report}
+\begin{lstlisting}[style=plain]
+cd docs
+pdflatex ScalaStream_Judge_Report.tex
+pdflatex ScalaStream_Judge_Report.tex
+\end{lstlisting}
+
+\end{document}
